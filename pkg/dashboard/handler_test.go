@@ -64,6 +64,7 @@ func decodeJSON(t *testing.T, w *httptest.ResponseRecorder) map[string]interface
 
 func TestHandleHealth(t *testing.T) {
 	h, _ := setupTestHandler(t)
+	h.Version = "9.9.9-test"
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -82,8 +83,8 @@ func TestHandleHealth(t *testing.T) {
 	if _, ok := m["accounts"]; !ok {
 		t.Error("missing accounts field")
 	}
-	if _, ok := m["version"]; !ok {
-		t.Error("missing version field")
+	if m["version"] != "9.9.9-test" {
+		t.Errorf("version = %v, want 9.9.9-test (dynamic version not wired)", m["version"])
 	}
 }
 
@@ -373,6 +374,44 @@ func TestHandleUpdateAndGetSettings(t *testing.T) {
 	}
 	if settings["lang"] != "zh" {
 		t.Errorf("lang = %v, want zh", settings["lang"])
+	}
+}
+
+// Regression for #11: a client (e.g. an older frontend Switch) sends a raw
+// JSON bool/number for a setting. The PUT must accept it and coerce to string
+// instead of failing with "cannot unmarshal bool into Go value of type string".
+func TestHandleUpdateSettingsCoercesNonStringValues(t *testing.T) {
+	h, _ := setupTestHandler(t)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// Raw JSON body with bool, number, null and string values.
+	body := `{"enable_request_logging":false,"max_connections":12,"theme":"dark","cleared":null}`
+	req := httptest.NewRequest("PUT", "/api/settings", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("put status = %d, want 200 (body: %s)", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest("GET", "/api/settings", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	settings := decodeJSON(t, w)["settings"].(map[string]interface{})
+
+	if got := settings["enable_request_logging"]; got != "false" {
+		t.Errorf("enable_request_logging = %v, want \"false\"", got)
+	}
+	if got := settings["max_connections"]; got != "12" {
+		t.Errorf("max_connections = %v, want \"12\"", got)
+	}
+	if got := settings["theme"]; got != "dark" {
+		t.Errorf("theme = %v, want \"dark\"", got)
+	}
+	if got := settings["cleared"]; got != "" {
+		t.Errorf("cleared = %v, want \"\"", got)
 	}
 }
 

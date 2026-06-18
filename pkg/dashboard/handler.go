@@ -33,6 +33,9 @@ type Handler struct {
 	staticFS  fs.FS
 	modelList []string
 	keeper    *keepalive.Keeper
+	// Version is the proxy version reported by /api/health; set by the server
+	// at startup (the build-time Version lives in package main).
+	Version string
 }
 
 func NewHandler(s *store.Store, staticFS fs.FS, k *keepalive.Keeper) *Handler {
@@ -574,6 +577,7 @@ func (h *Handler) handleAutoLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := joycode.NewClient(creds.PtKey, creds.UserID)
+	client.SetColorContext(creds.ColorBaseURL, creds.MasterBaseURL, creds.Tenant, creds.LoginType, creds.OrgFullName)
 	userInfo, err := client.UserInfo()
 	if err != nil {
 		slog.Error("auto-login: userInfo request failed", "user_id", creds.UserID, "error", err)
@@ -1363,9 +1367,17 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"settings": settings})
 
 	case http.MethodPut:
-		var settings map[string]string
-		if !readJSONBody(w, r, &settings) {
+		// Settings are stored as opaque strings, but clients (and older
+		// frontend builds) may send raw JSON bool/number values for toggles
+		// like enable_request_logging. Decode loosely and coerce to string so
+		// a bool no longer triggers "cannot unmarshal bool into ... string".
+		var raw map[string]json.RawMessage
+		if !readJSONBody(w, r, &raw) {
 			return
+		}
+		settings := make(map[string]string, len(raw))
+		for k, v := range raw {
+			settings[k] = coerceSettingValue(v)
 		}
 		if err := h.store.SetSettings(settings); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -1376,6 +1388,23 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// coerceSettingValue converts a raw JSON settings value into the string form
+// the settings store expects. JSON strings are unquoted; bool/number/other
+// tokens are kept verbatim (e.g. true -> "true", 12 -> "12"); null/empty -> "".
+func coerceSettingValue(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return ""
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+	}
+	return trimmed
 }
 
 // --- Health Handler ---
@@ -1393,9 +1422,13 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 		count = len(accounts)
 	}
 
+	version := h.Version
+	if version == "" {
+		version = "dev"
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":   "ok",
 		"accounts": count,
-		"version":  "0.3.0",
+		"version":  version,
 	})
 }

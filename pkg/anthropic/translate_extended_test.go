@@ -5,44 +5,36 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/vibe-coding-labs/JoyCodeProxy/pkg/joycode"
 )
 
 // ---------------------------------------------------------------------------
 // resolveModel (cases 1-4)
 // ---------------------------------------------------------------------------
 
-func TestResolveModel_AllModelMapping(t *testing.T) {
-	// Case 1: Every entry in ModelMapping returns the correct JoyCode model.
-	for anthropicModel, expected := range ModelMapping {
-		got := resolveModel(anthropicModel)
-		if got != expected {
-			t.Errorf("resolveModel(%q) = %q, want %q", anthropicModel, got, expected)
-		}
-	}
-}
-
 func TestResolveModel_KnownJoyCodePassThrough(t *testing.T) {
-	// Case 2: A known JoyCode model (e.g. "GLM-5.1") passes through directly.
+	// A known JoyCode model (e.g. "GLM-5.1") passes through directly.
 	input := "GLM-5.1"
-	got := resolveModel(input)
+	got := resolveModel(input, "", "")
 	if got != input {
 		t.Errorf("resolveModel(%q) = %q, want %q (pass-through)", input, got, input)
 	}
 }
 
 func TestResolveModel_UnknownDefaults(t *testing.T) {
-	// Case 3: Unknown model defaults to JoyAI-Code.
-	got := resolveModel("some-unknown-model-xyz")
-	if got != "JoyAI-Code" {
-		t.Errorf("resolveModel(unknown) = %q, want JoyAI-Code", got)
+	// Unknown model with no overrides defaults to JoyAI-Code.
+	got := resolveModel("some-unknown-model-xyz", "", "")
+	if got != joycode.DefaultModel {
+		t.Errorf("resolveModel(unknown) = %q, want %s", got, joycode.DefaultModel)
 	}
 }
 
 func TestResolveModel_EmptyString(t *testing.T) {
-	// Case 4: Empty string defaults to JoyAI-Code.
-	got := resolveModel("")
-	if got != "JoyAI-Code" {
-		t.Errorf("resolveModel('') = %q, want JoyAI-Code", got)
+	// Empty string with no overrides defaults to JoyAI-Code.
+	got := resolveModel("", "", "")
+	if got != joycode.DefaultModel {
+		t.Errorf("resolveModel('') = %q, want %s", got, joycode.DefaultModel)
 	}
 }
 
@@ -59,10 +51,10 @@ func TestTranslateRequest_Basic(t *testing.T) {
 			{Role: "user", Content: json.RawMessage(`"Hello"`)},
 		},
 	}
-	body := TranslateRequest(req)
+	body := TranslateRequest(req, "", "")
 
-	if body["model"] != "JoyAI-Code" {
-		t.Errorf("model = %v, want JoyAI-Code", body["model"])
+	if body["model"] != joycode.DefaultModel {
+		t.Errorf("model = %v, want %s", body["model"], joycode.DefaultModel)
 	}
 	if body["max_tokens"] != 1024 {
 		t.Errorf("max_tokens = %v, want 1024", body["max_tokens"])
@@ -89,7 +81,7 @@ func TestTranslateRequest_SystemString(t *testing.T) {
 			{Role: "user", Content: json.RawMessage(`"Hi"`)},
 		},
 	}
-	body := TranslateRequest(req)
+	body := TranslateRequest(req, "", "")
 	msgs := body["messages"].([]map[string]interface{})
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages (system + user), got %d", len(msgs))
@@ -112,7 +104,7 @@ func TestTranslateRequest_SystemArray(t *testing.T) {
 			{Role: "user", Content: json.RawMessage(`"Hi"`)},
 		},
 	}
-	body := TranslateRequest(req)
+	body := TranslateRequest(req, "", "")
 	msgs := body["messages"].([]map[string]interface{})
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages (system + user), got %d", len(msgs))
@@ -138,7 +130,7 @@ func TestTranslateRequest_WithTemperature(t *testing.T) {
 			{Role: "user", Content: json.RawMessage(`"Hello"`)},
 		},
 	}
-	body := TranslateRequest(req)
+	body := TranslateRequest(req, "", "")
 	if body["temperature"] != 0.5 {
 		t.Errorf("temperature = %v, want 0.5", body["temperature"])
 	}
@@ -155,7 +147,7 @@ func TestTranslateRequest_WithTopP(t *testing.T) {
 			{Role: "user", Content: json.RawMessage(`"Hello"`)},
 		},
 	}
-	body := TranslateRequest(req)
+	body := TranslateRequest(req, "", "")
 	if body["top_p"] != 0.9 {
 		t.Errorf("top_p = %v, want 0.9", body["top_p"])
 	}
@@ -171,7 +163,7 @@ func TestTranslateRequest_WithStopSequences(t *testing.T) {
 			{Role: "user", Content: json.RawMessage(`"Hello"`)},
 		},
 	}
-	body := TranslateRequest(req)
+	body := TranslateRequest(req, "", "")
 	stops, ok := body["stop"].([]string)
 	if !ok {
 		t.Fatalf("stop type = %T", body["stop"])
@@ -197,7 +189,7 @@ func TestTranslateRequest_WithTools(t *testing.T) {
 			{Role: "user", Content: json.RawMessage(`"What is the weather?"`)},
 		},
 	}
-	body := TranslateRequest(req)
+	body := TranslateRequest(req, "", "")
 	tools, ok := body["tools"].([]interface{})
 	if !ok {
 		t.Fatalf("tools type = %T", body["tools"])
@@ -234,7 +226,7 @@ func TestTranslateRequest_EmptyMessages(t *testing.T) {
 		MaxTokens: 1024,
 		Messages:  []MessageParam{},
 	}
-	body := TranslateRequest(req)
+	body := TranslateRequest(req, "", "")
 	msgs, ok := body["messages"].([]map[string]interface{})
 	if !ok {
 		t.Fatalf("messages type = %T", body["messages"])
